@@ -1,8 +1,8 @@
 import sys
-import tensorflow as tf
 
 from PIL import Image, ImageDraw, ImageFont
-from transformers import AutoTokenizer, TFBertForMaskedLM
+import torch
+from transformers import AutoTokenizer, BertForMaskedLM
 
 # Pre-trained masked language model
 MODEL = "bert-base-uncased"
@@ -17,11 +17,12 @@ PIXELS_PER_WORD = 200
 
 
 def main():
-    text = input("Text: ")
+    #text = input("Text: ")
+    text = "The lion [MASK] loudly at the man"
 
     # Tokenize input
     tokenizer = AutoTokenizer.from_pretrained(MODEL)
-    inputs = tokenizer(text, return_tensors="tf")
+    inputs = tokenizer(text, return_tensors="pt")
     mask_token_index = get_mask_token_index(tokenizer.mask_token_id, inputs)
     print(mask_token_index)
     
@@ -29,12 +30,18 @@ def main():
         sys.exit(f"Input must include mask token {tokenizer.mask_token}.")
 
     # Use model to process input
-    model = TFBertForMaskedLM.from_pretrained(MODEL)
+    model = BertForMaskedLM.from_pretrained(MODEL)
+    model.eval()
+
+    with torch.no_grad():
+        result = model(**inputs, output_attentions=True)
+
     result = model(**inputs, output_attentions=True)
 
     # Generate predictions
     mask_token_logits = result.logits[0, mask_token_index]
-    top_tokens = tf.math.top_k(mask_token_logits, K).indices.numpy()
+    top_tokens = torch.topk(mask_token_logits, K).indices.tolist()
+
     for token in top_tokens:
         print(text.replace(tokenizer.mask_token, tokenizer.decode([token])))
 
@@ -62,7 +69,7 @@ def get_color_for_attention_score(attention_score):
     Return a tuple of three integers representing a shade of gray for the
     given `attention_score`. Each value should be in the range [0, 255].
     """
-    val = round(attention_score * 255)
+    val = int(attention_score * 255)
     return (val, val, val)
 
 
@@ -77,13 +84,14 @@ def visualize_attentions(tokens, attentions):
     include both the layer number (starting count from 1) and head number
     (starting count from 1).
     """
-    # TODO: Update this function to produce diagrams for all layers and heads.
-    generate_diagram(
-        1,
-        1,
-        tokens,
-        attentions[0][0][0]
-    )
+    for i in range(len(attentions)):
+        for k in range(len(attentions[i][0])):
+            generate_diagram(
+                i+1,
+                k+1,
+                tokens,
+                attentions[i][0][k]
+            )
 
 
 def generate_diagram(layer_number, head_number, tokens, attention_weights):
